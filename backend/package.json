@@ -1,0 +1,28 @@
+{
+  "name": "physioai-backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "PhysioAI API (Express + Prisma + PostgreSQL on Railway, JWT auth) — V3 app on V2's backend stack. Shared by the Patient mobile app and the Therapist web. Also serves ../Therapist with a MediaPipe-WASM-friendly CSP on a Node host.",
+  "scripts": {
+    "dev": "node server.js",
+    "start": "prisma db push --skip-generate && node server.js",
+    "postinstall": "prisma generate",
+    "db:push": "prisma db push",
+    "studio": "prisma studio",
+    "vercel:dev": "npx vercel dev",
+    "vercel:deploy": "npx vercel deploy",
+    "vercel:deploy:prod": "npx vercel deploy --prod"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.18.0",
+    "bcryptjs": "^2.4.3",
+    "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.2"
+  },
+  "devDependencies": {
+    "prisma": "^5.18.0"
+  }
+}

@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>PhysioAI · Data Recorder</title>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<link rel="icon" href="../shared/assets/favicon.svg" type="image/svg+xml"/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="../shared/assets/theme.css"/>
+<style>
+  .rec-main { display: grid; grid-template-columns: 1fr 400px; gap: 20px; padding: 20px 24px; align-items: start; max-width: 1280px; margin: 0 auto; }
+  .video-card { background: var(--surface); border: 1px solid var(--line); border-radius: 18px; overflow: hidden; }
+  .video-frame { position: relative; aspect-ratio: 16/10; background: var(--surface3); overflow: hidden; }
+  .video-frame video, .video-frame canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+  .video-frame canvas { pointer-events: none; }
+  .video-hud { position: absolute; top: 12px; left: 12px; right: 12px; display: flex; justify-content: space-between; pointer-events: none; }
+  .video-actions { display: flex; align-items: center; gap: 10px; padding: 14px; border-top: 1px solid var(--line); flex-wrap: wrap; }
+  .panel { display: flex; flex-direction: column; gap: 14px; }
+  .rec-dot { display:inline-block; width:9px; height:9px; border-radius:50%; background:#B8423C; margin-right:6px; animation: blink 1s infinite; }
+  @keyframes blink { 50% { opacity: .25; } }
+  .count-grid { display:grid; grid-template-columns: 1fr auto; gap: 4px 12px; font-size: 13px; }
+  .count-grid b { font-family: 'JetBrains Mono', monospace; }
+  @media (max-width: 900px) { .rec-main { grid-template-columns: 1fr; padding: 16px; } }
+</style>
+</head>
+<body class="web-shell">
+<div id="top"></div>
+<div id="root"></div>
+<script type="module">
+import { h, clear, mountNav, onLangChange, getLang, t, icon, toast } from '../shared/core/ui.js';
+import { ensureTherapist, getTherapist, logout, isGuest } from '../shared/core/auth-ui.js';
+import { EXERCISES, getExercise } from '../shared/core/exercises.js';
+import { getReference, getSettings, saveSettings } from '../shared/core/store.js';
+import { createPoseEngine, makeDrawer, startCamera, stopCamera } from '../shared/ai/PoseDetection.js';
+import { jointAngleCalculator, JOINT_SPECS } from '../shared/ai/JointAngleCalculator.js';
+import { makeSyntheticFeed } from '../shared/ai/SyntheticPose.js';
+import { drawBoundaryBox, evaluateBoundaryBox } from '../shared/ai/BoundaryBoxGate.js';
+
+const engine = createPoseEngine();
+const TH = () => getLang() === 'th';
+
+// Label set: 1 correct + common wrong-form variants (อิงเกณฑ์: เทียบกับ reference ของ therapist)
+const LABELS = [
+  { id: 'correct',        en: 'Correct form',        th: 'ท่าถูกต้อง' },
+  { id: 'wrong-undershoot', en: 'Wrong · not full range', th: 'ผิด · ยกไม่สุด' },
+  { id: 'wrong-lean',     en: 'Wrong · leaning',     th: 'ผิด · เอียงตัว' },
+  { id: 'wrong-multi',    en: 'Wrong · multi-joint', th: 'ผิด · หลายข้อต่อ' },
+];
+
+const S = {
+  cameraOn: false, demoOn: false, recording: false,
+  exId: EXERCISES[0].id, person: 'P01', label: 'correct',
+  variant: getSettings().modelVariant,
+  rows: [], lastVideoTime: -1, feed: null, t0: 0, raf: 0,
+  boundary: null, boundaryFrame: null,
+};
+let R = {};
+let drawer = null;
+let authed = false; // gate: render() is a no-op until ensureTherapist() resolves (blocks cross-tab pre-auth paint)
+
+const refFor = () => getReference(S.exId);
+
+/* ── CSV ──────────────────────────────────────────────────── */
+function csvText() {
+  const cols = ['person', 'exercise', 'label', 't_ms', 'boundary_status', 'boundary_will_exit',
+    ...JOINT_SPECS.map((s) => 'a_' + s.joint), ...JOINT_SPECS.map((s) => 'd_' + s.joint)];
+  const lines = [cols.join(',')];
+  for (const r of S.rows) lines.push(cols.map((c) => r[c] ?? '').join(','));
+  return lines.join('\n');
+}
+function download() {
+  if (!S.rows.length) { toast(TH() ? 'ยังไม่มีข้อมูล' : 'No data yet'); return; }
+  const blob = new Blob([csvText()], { type: 'text/csv' });
+  const a = h('a', { href: URL.createObjectURL(blob), download: `physioai_dataset_${S.person}_${Date.now()}.csv` });
+  document.body.append(a); a.click(); a.remove();
+  toast((TH() ? 'ดาวน์โหลดแล้ว · ' : 'Downloaded · ') + S.rows.length + ' rows');
+}
+
+/* ── Recording ───────────────────────────────────────────── */
+let _lastPush = 0;
+const PUSH_MS = 33; // cap dataset rate at ~30 fps (matches the real pipeline)
+function pushFrame(landmarks, tMs, boundary) {
+  if (boundary?.status === 'outside') return;
+  if (tMs - _lastPush < PUSH_MS) return;
+  _lastPush = tMs;
+  const angles = jointAngleCalculator(landmarks);
+  const ref = refFor()?.jointAngles || null;
+  const row = {
+    person: S.person, exercise: S.exId, label: S.label, t_ms: Math.round(tMs),
+    boundary_status: boundary?.status || '',
+    boundary_will_exit: boundary?.willExit ? '1' : '0',
+  };
+  for (const spec of JOINT_SPECS) {
+    const a = angles[spec.joint];
+    row['a_' + spec.joint] = a == null ? '' : a.toFixed(2);
+    const rv = ref?.[spec.joint];
+    row['d_' + spec.joint] = (a == null || rv == null) ? '' : (a - rv).toFixed(2);
+  }
+  S.rows.push(row);
+  if (S.rows.length % 5 === 0) refreshStats();
+}
+
+function refreshStats() {
+  if (R.frameBadge) R.frameBadge.textContent = `${S.rows.length} frames`;
+  if (!R.counts) return;
+  const by = {};
+  for (const r of S.rows) { const k = r.label + '|' + r.exercise; by[k] = (by[k] || 0) + 1; }
+  clear(R.counts);
+  const entries = Object.entries(by).sort();
+  if (!entries.length) R.counts.append(h('span', { class: 'muted' }, TH() ? 'ยังไม่มีข้อมูล' : 'No frames yet'));
+  for (const [k, n] of entries) {
+    const [label, ex] = k.split('|');
+    R.counts.append(h('span', {}, `${ex} · ${label}`), h('b', {}, String(n)));
+  }
+}
+
+function setRecording(on) {
+  if (on && !S.cameraOn && !S.demoOn) { toast(TH() ? 'เปิดกล้องหรือ Demo ก่อน' : 'Start camera or demo first'); return; }
+  if (on && !refFor()) toast(TH() ? 'เตือน: ท่านี้ยังไม่มี reference — คอลัมน์ delta จะว่าง' : 'Warning: no reference for this exercise — delta columns will be empty', 3200);
+  S.recording = on;
+  R.recBtn.className = 'btn ' + (on ? 'danger' : 'primary');
+  R.recBtn.innerHTML = on ? '<span class="rec-dot"></span>' + (TH() ? 'หยุดอัด' : 'Stop') : icon('play', { size: 16, color: '#FBFAF5' }) + ' ' + (TH() ? 'เริ่มอัด' : 'Record');
+  R.recBadge.style.display = on ? '' : 'none';
+}
+
+/* ── Engine loops ────────────────────────────────────────── */
+function liveLoop() {
+  if (!S.cameraOn) return;
+  if (engine.state.ready && R.video.currentTime !== S.lastVideoTime) {
+    S.lastVideoTime = R.video.currentTime;
+    const res = engine.detectVideo(R.video, performance.now());
+    const lm = res?.landmarks?.[0];
+    const boundary = paint(lm);
+    if (lm && S.recording) pushFrame(lm, performance.now() - S.t0, boundary);
+  }
+  S.raf = requestAnimationFrame(liveLoop);
+}
+function demoLoop() {
+  if (!S.demoOn) return;
+  const el = (performance.now() - S.t0) / 1000;
+  const { landmarks } = S.feed(el);
+  const boundary = paint(landmarks);
+  if (S.recording) pushFrame(landmarks, performance.now() - S.t0, boundary);
+  S.raf = requestAnimationFrame(demoLoop);
+}
+function boundaryText(boundary) {
+  if (!boundary) return t('noPose');
+  if (TH()) return boundary.hintTh;
+  return boundary.hint;
+}
+function boundaryClass(boundary) {
+  const status = boundary?.status || 'outside';
+  return 'pill ' + (status === 'inside' ? 'good' : 'bad') + ' glass';
+}
+function currentBoundary(landmarks, { reset = false } = {}) {
+  return evaluateBoundaryBox(landmarks, reset ? null : S.boundaryFrame, { ...getExercise(S.exId), bodyRegion: 'full', primaryJoint: null });
+}
+function paint(lm) {
+  const ctx = R.canvas.getContext('2d');
+  ctx.clearRect(0, 0, R.canvas.width, R.canvas.height);
+  if (!lm) {
+    const boundary = currentBoundary(null, { reset: true });
+    S.boundary = boundary; S.boundaryFrame = boundary.nextFrame;
+    drawBoundaryBox(ctx, boundary);
+    R.poseStatus.textContent = `${t('noPose')} · ${boundaryText(boundary)}`;
+    R.poseStatus.className = boundaryClass(boundary);
+    return boundary;
+  }
+  const boundary = currentBoundary(lm);
+  S.boundary = boundary; S.boundaryFrame = boundary.nextFrame;
+  R.poseStatus.textContent = `${lm.length} pts · ${boundaryText(boundary)}`;
+  R.poseStatus.className = boundaryClass(boundary);
+  drawer(lm, { color: S.recording ? '#B8423C' : '#2F5D50', accent: S.recording ? '#D98C84' : '#7BA88F' });
+  drawBoundaryBox(ctx, boundary);
+  return boundary;
+}
+
+/* ── Camera / demo control ───────────────────────────────── */
+async function toggleCamera() {
+  if (S.demoOn) toggleDemo(false);
+  if (S.cameraOn) {
+    stopCamera(R.video); S.cameraOn = false; setRecording(false); S.boundary = null; S.boundaryFrame = null;
+    R.camBtn.className = 'btn primary'; R.camBtn.innerHTML = icon('cam', { size: 16, color: '#FBFAF5' }) + ' ' + t('startCamera');
+    return;
+  }
+  try {
+    await startCamera(R.video, { facingMode: 'user' });
+    if (!engine.state.ready) await initEngine();
+    R.canvas.width = R.video.videoWidth; R.canvas.height = R.video.videoHeight;
+    S.cameraOn = true; S.t0 = performance.now(); S.boundary = null; S.boundaryFrame = null;
+    R.camBtn.className = 'btn danger'; R.camBtn.innerHTML = icon('close', { size: 16, color: '#FBFAF5' }) + ' ' + t('stopCamera');
+    requestAnimationFrame(liveLoop);
+  } catch (e) { toast(t('cameraDenied')); }
+}
+function toggleDemo(force) {
+  const next = force != null ? force : !S.demoOn;
+  if (next && S.cameraOn) toggleCamera();
+  S.demoOn = next;
+  if (next) {
+    S.feed = makeSyntheticFeed(getExercise(S.exId));
+    S.t0 = performance.now();
+    R.canvas.width = 960; R.canvas.height = 600;
+    S.boundary = null; S.boundaryFrame = null;
+    R.video.style.display = 'none';
+    requestAnimationFrame(demoLoop);
+  } else {
+    R.video.style.display = ''; S.boundary = null; S.boundaryFrame = null;
+    setRecording(false);
+    const ctx = R.canvas.getContext('2d'); ctx.clearRect(0, 0, R.canvas.width, R.canvas.height);
+  }
+  R.demoBtn.className = 'btn ' + (next ? 'danger' : 'ghost');
+  R.demoBtn.innerHTML = icon('play', { size: 16 }) + ' ' + (next ? (TH() ? 'หยุด Demo' : 'Stop demo') : t('demoMode'));
+}
+
+async function initEngine() {
+  try {
+    R.statusPill.textContent = t('loadingModel'); R.statusPill.className = 'pill warn';
+    const info = await engine.init(S.variant);
+    R.statusPill.textContent = (TH() ? 'พร้อม' : 'Ready') + ' · ' + info.delegate; R.statusPill.className = 'pill good';
+  } catch (e) { R.statusPill.textContent = TH() ? 'โหลดโมเดลไม่สำเร็จ' : 'Model failed'; R.statusPill.className = 'pill bad'; }
+}
+
+/* ── UI ──────────────────────────────────────────────────── */
+function render() {
+  if (!authed) return;
+  const top = document.getElementById('top'); clear(top);
+  R.statusPill = h('span', { class: 'pill' }, t('loadingModel'));
+  R.camBtn = h('button', { class: 'btn primary', html: icon('cam', { size: 16, color: '#FBFAF5' }) + ' ' + t('startCamera'), onclick: toggleCamera });
+  const me = getTherapist();
+  const whoBtn = h('button', { class: 'btn ghost', title: isGuest() ? (TH() ? 'ออกจากเดโม' : 'Exit demo') : (TH() ? 'ออกจากระบบ' : 'Log out'),
+    onclick: () => { logout(); location.reload(); } }, me?.name || (isGuest() ? 'Guest' : (TH() ? 'นักกายภาพ' : 'Therapist')));
+  top.append(h('div', { class: 'topbar' },
+    h('div', { class: 'brand-row' },
+      h('div', { class: 'logo-mark', html: '<img src="../shared/assets/logo-reversed.svg" width="20" height="20" alt="PhysioAI"/>' }),
+      h('div', {}, h('div', { class: 'wordmark', html: 'Physio<b>AI</b>' }),
+        h('div', { style: { fontSize: '15px', fontWeight: '600' } }, TH() ? 'เก็บข้อมูลสำหรับเทรน AI (ML Form Scorer)' : 'AI Training Data Recorder (ML Form Scorer)')),
+    ),
+    h('div', { class: 'row gap10 wrap', style: { justifyContent: 'flex-end' } }, R.statusPill, whoBtn, R.camBtn),
+  ));
+
+  const root = document.getElementById('root'); clear(root);
+  const video = h('video', { autoplay: '', muted: '', playsinline: '' });
+  const canvas = h('canvas');
+  R.video = video; R.canvas = canvas;
+  R.recBadge = h('span', { class: 'pill bad glass', style: { display: 'none' }, html: '<span class="rec-dot"></span>REC' });
+  R.poseStatus = h('span', { class: 'pill glass' }, t('noPose'));
+  R.frameBadge = h('span', { class: 'pill glass' }, '0 frames');
+  R.recBtn = h('button', { class: 'btn primary', html: icon('play', { size: 16, color: '#FBFAF5' }) + ' ' + (TH() ? 'เริ่มอัด' : 'Record'), onclick: () => setRecording(!S.recording) });
+  R.demoBtn = h('button', { class: 'btn ghost', html: icon('play', { size: 16 }) + ' ' + t('demoMode'), onclick: () => toggleDemo() });
+
+  const main = h('div', { class: 'rec-main' },
+    h('div', { class: 'video-card' },
+      h('div', { class: 'video-frame' }, video, canvas,
+        h('div', { class: 'video-hud' }, h('div', { class: 'row gap6' }, R.recBadge, R.frameBadge), R.poseStatus)),
+      h('div', { class: 'video-actions' }, R.demoBtn, h('div', { class: 'grow' }), R.recBtn),
+    ),
+    h('div', { id: 'panel', class: 'panel' }),
+  );
+  root.append(main);
+  drawer = makeDrawer(canvas.getContext('2d'));
+  renderPanel();
+  mountNav('therapist/record');
+}
+
+function renderPanel() {
+  const panel = document.getElementById('panel'); if (!panel) return; clear(panel);
+  const exercisePill = (e) => h('button', {
+    class: 'pill' + (e.id === S.exId ? ' brand' : ''),
+    onclick: () => { S.exId = e.id; if (S.demoOn) { S.feed = makeSyntheticFeed(getExercise(S.exId)); } renderPanel(); },
+  }, t('ex_' + e.key));
+  const standardExercises = EXERCISES.filter((e) => e.category !== 'health_rom').map(exercisePill);
+  const romExercises = EXERCISES.filter((e) => e.category === 'health_rom').map(exercisePill);
+
+  const exSel = h('div', { class: 'card' },
+    h('div', { class: 'eyebrow', style: { marginBottom: '8px' } }, t('exercise')),
+    h('div', { class: 'row gap6 wrap' }, ...standardExercises),
+    romExercises.length ? h('div', { class: 'eyebrow', style: { marginTop: '12px', marginBottom: '8px' } }, t('healthRomCategory')) : null,
+    romExercises.length ? h('div', { class: 'row gap6 wrap' }, ...romExercises) : null,
+    h('div', { class: 'muted', style: { fontSize: '12px', marginTop: '8px' } },
+      refFor() ? (TH() ? '✓ มี reference สำหรับท่านี้ — delta จะถูกคำนวณ' : '✓ Reference exists — delta will be computed')
+               : (TH() ? '⚠ ยังไม่มี reference — ไป Capture ที่หน้า Setup ก่อน' : '⚠ No reference yet — capture one in Setup first')),
+  );
+
+  const personIn = h('input', { class: 'input', value: S.person, placeholder: 'P01',
+    oninput: (e) => { S.person = e.target.value.trim() || 'P01'; } });
+  const personCard = h('div', { class: 'card col gap8' },
+    h('div', { class: 'eyebrow' }, TH() ? 'รหัสผู้ทดสอบ (สำหรับ person-wise split)' : 'Person ID (for person-wise split)'), personIn,
+    h('div', { class: 'muted', style: { fontSize: '12px' } }, TH() ? 'เปลี่ยนรหัสทุกครั้งที่เปลี่ยนคน — ห้ามใช้ซ้ำ' : 'Change per participant — never reuse'));
+
+  const labelCard = h('div', { class: 'card col gap8' },
+    h('div', { class: 'eyebrow' }, TH() ? 'Label ของช่วงที่จะอัด' : 'Label for this take'),
+    h('div', { class: 'row gap6 wrap' }, ...LABELS.map((L) => h('button', {
+      class: 'pill' + (S.label === L.id ? ' brand' : ''),
+      onclick: () => { S.label = L.id; renderPanel(); },
+    }, TH() ? L.th : L.en))),
+    h('div', { class: 'muted', style: { fontSize: '12px' } },
+      TH() ? 'เกณฑ์ "ถูก": ทำตาม reference ของนักกายภาพ · ตอนอัด "ผิด" ให้ตั้งใจทำผิดตามชนิดที่เลือก' : 'Criteria: "correct" follows the therapist reference; act out the chosen wrong type deliberately'));
+
+  R.counts = h('div', { class: 'count-grid' });
+  const statCard = h('div', { class: 'card col gap8' },
+    h('div', { class: 'eyebrow' }, TH() ? 'ข้อมูลที่เก็บแล้ว' : 'Collected'), R.counts,
+    h('div', { class: 'row gap8', style: { marginTop: '6px' } },
+      h('button', { class: 'btn primary grow', html: icon('check', { size: 16, color: '#FBFAF5' }) + ' ' + (TH() ? 'ดาวน์โหลด CSV' : 'Download CSV'), onclick: download }),
+      h('button', { class: 'btn ghost', html: icon('trash', { size: 16 }), onclick: () => { if (confirm(TH() ? 'ล้างข้อมูลที่อัดไว้?' : 'Clear recorded data?')) { S.rows = []; refreshStats(); } } }),
+    ),
+    h('div', { class: 'muted', style: { fontSize: '12px' } },
+      TH() ? 'เป้าหมาย: ≥300 เฟรม/label/ท่า จากผู้ทดสอบ ≥2–3 คน' : 'Target: ≥300 frames/label/exercise from ≥2–3 people'));
+
+  panel.append(exSel, personCard, labelCard, statCard);
+  refreshStats();
+}
+
+onLangChange(render);
+window.addEventListener('beforeunload', () => { stopCamera(R.video); engine.close(); });
+(async () => {
+  await ensureTherapist();
+  authed = true;
+  Object.defineProperty(window, '__recRows', { get: () => S.rows }); // debug hook — installed post-auth only
+  render();
+  initEngine();
+})();
+</script>
+</body>
+</html>

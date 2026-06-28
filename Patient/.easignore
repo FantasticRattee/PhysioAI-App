@@ -1,0 +1,12 @@
+# EAS upload ignore.
+# The parent repo (the monorepo root) gitignores all of `App/`
+# ("local-only app code"), so EAS — which otherwise selects files via git — would
+# upload nothing. With this .easignore present, EAS archives App/Patient directly,
+# honoring only these excludes. Keep src/, assets/ (incl. the ~15 MB .task pose
+# models), plugins/, and the config files so the cloud build has everything.
+node_modules/
+.expo/
+ios/
+android/
+*.log
+.DS_Store

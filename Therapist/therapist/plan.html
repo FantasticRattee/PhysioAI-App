@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>PhysioAI · Plan Builder</title>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<link rel="icon" href="../shared/assets/favicon.svg" type="image/svg+xml"/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="../shared/assets/theme.css"/>
+<style>
+  .plan-main { display: grid; grid-template-columns: 1fr 360px; gap: 20px; padding: 20px 24px; align-items: start; max-width: 1200px; margin: 0 auto; }
+  .dose-row { display: grid; grid-template-columns: 1fr auto auto auto; gap: 10px; align-items: center; padding: 12px 0; border-top: 1px solid var(--line); }
+  .dose-row:first-of-type { border-top: 0; }
+  .dose-field { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+  .dose-field input { width: 64px; text-align: center; padding: 6px 8px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); font: inherit; color: inherit; }
+  .dose-field .cap { font-size: 10.5px; letter-spacing: .5px; text-transform: uppercase; color: var(--ink3); font-weight: 600; }
+  .sched-field { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .sched-field input { width: 110px; text-align: right; padding: 7px 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); font: inherit; color: inherit; }
+  .x-btn { border: 0; background: transparent; color: var(--ink3); cursor: pointer; padding: 6px; border-radius: 8px; }
+  .x-btn:hover { background: var(--surface2); color: var(--bad); }
+  .sum-stat { display: flex; align-items: baseline; justify-content: space-between; padding: 7px 0; }
+  .sum-stat b { font-size: 16px; }
+  @media (max-width: 880px) { .plan-main { grid-template-columns: 1fr; padding: 16px; } }
+
+  /* Plan Builder right column — schedule steppers · program-span timeline · prescription card */
+  .sub-label { font-size: 10.5px; letter-spacing: 1px; text-transform: uppercase; color: var(--ink3); font-weight: 600; margin: 14px 0 8px; }
+  .sub-label:first-of-type { margin-top: 4px; }
+  .cad { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .f-cap { display: block; font-size: 11.5px; color: var(--ink2); font-weight: 600; margin-bottom: 5px; }
+  .stepper { display: flex; align-items: center; justify-content: space-between; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; }
+  .stepper button { width: 34px; height: 38px; border: 0; background: transparent; color: var(--ink2); font-size: 18px; cursor: pointer; line-height: 1; }
+  .stepper button:hover { background: var(--surface2); color: var(--brand-deep); }
+  .stepper input { width: 100%; min-width: 0; border: 0; background: transparent; text-align: center; font-family: var(--mono); font-weight: 600; font-size: 16px; color: var(--ink); padding: 0; outline: none; }
+  .stepper input:focus { box-shadow: none; }
+  .tf-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+  .tf-row input[type="date"] { width: 150px; text-align: right; font-family: var(--mono); font-size: 13px; }
+  .len { display: flex; align-items: center; gap: 8px; }
+  .len .stepper { width: 120px; }
+  .len .unit { font-size: 12px; color: var(--ink3); font-weight: 600; }
+  .tl { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
+  .tl-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 9px; }
+  .tl-weeks { font-family: var(--mono); font-weight: 600; font-size: 13px; color: var(--brand-deep); }
+  .tl-bar { position: relative; height: 10px; border-radius: var(--r-pill); background: var(--surface2); box-shadow: inset 0 0 0 1px var(--line); }
+  .tl-fill { position: absolute; inset: 0; border-radius: var(--r-pill); background: linear-gradient(90deg, var(--brand), var(--brand-deep)); }
+  .tl-tick { position: absolute; top: 50%; width: 2px; height: 10px; transform: translate(-1px, -50%); background: rgba(255,255,255,.55); border-radius: 2px; }
+  .tl-cap { position: absolute; top: 50%; width: 14px; height: 14px; border-radius: var(--r-pill); background: var(--surface); transform: translate(-50%, -50%); }
+  .tl-cap.start { left: 1px; transform: translate(0, -50%); box-shadow: 0 0 0 3px var(--brand-deep); }
+  .tl-cap.end { right: 1px; transform: translate(0, -50%); box-shadow: 0 0 0 3px var(--brand); }
+  .tl-dates { display: flex; justify-content: space-between; margin-top: 9px; font-family: var(--mono); font-size: 12px; color: var(--ink2); }
+  .tl-dates small { display: block; font-family: var(--sans); font-size: 10px; letter-spacing: .5px; text-transform: uppercase; color: var(--ink3); font-weight: 600; }
+  .tl-dates .end { text-align: right; }
+  .prog { position: relative; overflow: hidden; }
+  .prog::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: linear-gradient(180deg, var(--brand), var(--brand-deep)); }
+  .prog .eyebrow { color: var(--brand-deep); }
+  .prog.empty::before { background: var(--surface3); }
+  .prog.empty .eyebrow { color: var(--ink3); }
+  .hero { display: flex; align-items: baseline; gap: 10px; margin: 10px 0 2px; }
+  .hero .num { font-family: var(--mono); font-weight: 700; font-size: 46px; line-height: .9; color: var(--brand-deep); letter-spacing: -1px; }
+  .hero.empty .num { color: var(--ink3); font-size: 34px; }
+  .hero .u { display: flex; flex-direction: column; gap: 1px; }
+  .hero .u b { font-size: 14px; font-weight: 600; color: var(--ink); }
+  .hero .u span { font-size: 12px; color: var(--ink3); }
+  .breakdown { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 14px; }
+  .chip { display: inline-flex; align-items: center; gap: 5px; padding: 5px 10px; border-radius: var(--r-pill); background: var(--brand-soft); color: var(--brand-deep); font-size: 12px; font-weight: 600; }
+  .chip .d { font-family: var(--mono); }
+  .prog .hint { font-size: 12.5px; color: var(--ink3); margin: 8px 0 14px; line-height: 1.5; }
+</style>
+</head>
+<body class="web-shell">
+<div id="top"></div>
+<div id="root"></div>
+<script type="module">
+import { h, clear, mountNav, onLangChange, getLang, t, icon, toast } from '../shared/core/ui.js';
+import { COUNT_MODES, getExercises, getExercise, exLabel, exerciseSnapshot } from '../shared/core/exercises.js';
+import { getPlanFull, savePlanFull, getAllReferences, syncPatientCloudData } from '../shared/core/store.js';
+import { ensureTherapist, getTherapist, logout, isGuest } from '../shared/core/auth-ui.js';
+import { fetchPatients, linkPatient } from '../shared/core/patients.js';
+
+const S = { patientId: null, patients: [], plan: null };
+let authed = false; // gate: render() is a no-op until ensureTherapist() resolves (blocks cross-tab pre-auth paint)
+
+// Local "today" as YYYY-MM-DD (offset-shifted so toISOString gives the local date).
+function todayStr() {
+  const d = new Date();
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+}
+// Add weeks by pure UTC-date arithmetic on a plain YYYY-MM-DD (no timezone drift).
+function addWeeks(dateStr, weeks) {
+  const d = new Date((dateStr || todayStr()) + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() + (Number(weeks) || 0) * 7);
+  return d.toISOString().slice(0, 10);
+}
+function addDays(dateStr, days) {
+  const d = new Date((dateStr || todayStr()) + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() + (Number(days) || 0));
+  return d.toISOString().slice(0, 10);
+}
+function loadPlan() {
+  S.plan = getPlanFull(S.patientId);
+  if (!S.plan.startDate) S.plan.startDate = todayStr();
+}
+const inPlan = (id) => S.plan.items.some((i) => i.exerciseId === id);
+
+async function loadPatientData(patientId) {
+  if (patientId) await syncPatientCloudData(patientId);
+  loadPlan();
+}
+
+async function refreshPatients(preferredId = null) {
+  S.patients = await fetchPatients();
+  S.patientId = preferredId && S.patients.some((p) => p.id === preferredId)
+    ? preferredId
+    : (S.patientId && S.patients.some((p) => p.id === S.patientId) ? S.patientId : S.patients[0]?.id || null);
+  await loadPatientData(S.patientId);
+}
+
+async function addPatient() {
+  const lang = getLang();
+  const value = prompt(lang === 'th' ? 'Patient email หรือ patient id' : 'Patient email or patient id');
+  if (!value) return;
+  try {
+    const patient = await linkPatient(value);
+    await refreshPatients(patient.id);
+    toast(lang === 'th' ? `ผูกผู้ป่วยแล้ว · ${patient.name}` : `Patient linked · ${patient.name}`);
+    render();
+  } catch (e) {
+    toast(lang === 'th' ? 'ผูกผู้ป่วยไม่สำเร็จ' : 'Could not link patient');
+  }
+}
+
+// ── Top bar (patient selector + save) ───────────────────────
+function topbar() {
+  const lang = getLang();
+  const patients = S.patients;
+  const top = document.getElementById('top'); clear(top);
+  const patientSel = patients.length
+    ? h('select', { onchange: async (e) => {
+        S.patientId = e.target.value;
+        try { await loadPatientData(S.patientId); }
+        catch { toast(getLang() === 'th' ? 'โหลดข้อมูลผู้ป่วยจากคลาวด์ไม่สำเร็จ' : 'Could not load patient cloud data'); loadPlan(); }
+        renderMain();
+      } },
+        ...patients.map((p) => h('option', { value: p.id, selected: p.id === S.patientId ? '' : null }, p.name)))
+    : h('select', { disabled: '' }, h('option', {}, lang === 'th' ? 'ยังไม่มีผู้ป่วย' : 'No patients yet'));
+  const me = getTherapist();
+  const whoName = me?.name || (isGuest() ? 'Guest' : (lang === 'th' ? 'นักกายภาพ' : 'Therapist'));
+  const whoBtn = h('button', { class: 'btn ghost', title: isGuest() ? (lang === 'th' ? 'ออกจากเดโม' : 'Exit demo') : (lang === 'th' ? 'ออกจากระบบ' : 'Log out'),
+    onclick: () => { logout(); location.reload(); } }, whoName);
+  const addPatientBtn = h('button', { class: 'btn ghost', title: lang === 'th' ? 'ผูกผู้ป่วย' : 'Link patient',
+    onclick: addPatient, html: icon('plus', { size: 16 }) });
+  const saveBtn = h('button', { class: 'btn primary', onclick: save,
+    html: icon('check', { size: 16, color: '#FBFAF5' }) + ' ' + t('savePlan') });
+  top.append(h('div', { class: 'topbar' },
+    h('div', { class: 'brand-row' },
+      h('div', { class: 'logo-mark', html: '<img src="../shared/assets/logo-reversed.svg" width="20" height="20" alt="PhysioAI"/>' }),
+      h('div', {}, h('div', { class: 'wordmark', html: 'Physio<b>AI</b>' }),
+        h('div', { style: { fontSize: '15px', fontWeight: '600' } }, t('modePlan'))),
+    ),
+    h('div', { class: 'row gap10 wrap', style: { justifyContent: 'flex-end' } }, whoBtn, addPatientBtn, patientSel, saveBtn),
+  ));
+}
+
+// ── Exercise picker (multi-select) ──────────────────────────
+function pickerCard() {
+  const exerciseChoices = getExercises();
+  const pill = (e) => h('button', {
+    class: 'pill' + (inPlan(e.id) ? ' brand' : ''),
+    onclick: () => toggleExercise(e.id),
+    html: icon(inPlan(e.id) ? 'check' : 'plus', { size: 13, color: inPlan(e.id) ? '#FBFAF5' : 'var(--ink2)' }),
+  }, ' ' + exLabel(e, t));
+  const standard = exerciseChoices.filter((e) => e.category !== 'health_rom').map(pill);
+  const rom = exerciseChoices.filter((e) => e.category === 'health_rom').map(pill);
+  return h('div', { class: 'card' },
+    h('div', { class: 'eyebrow', style: { marginBottom: '4px' } }, t('exercise')),
+    h('div', { class: 'muted', style: { fontSize: '12.5px', marginBottom: '10px' } }, t('tapToAdd')),
+    h('div', { class: 'row gap6 wrap' }, ...standard),
+    rom.length ? h('div', { class: 'eyebrow', style: { marginTop: '12px', marginBottom: '8px' } }, t('healthRomCategory')) : null,
+    rom.length ? h('div', { class: 'row gap6 wrap' }, ...rom) : null,
+  );
+}
+
+// ── Dosage list (reps / sets / hold per exercise) ───────────
+function doseField(cap, item, key, min, max) {
+  return h('div', { class: 'dose-field' },
+    h('span', { class: 'cap' }, cap),
+    h('input', { type: 'number', value: String(item[key]), min: String(min), max: String(max),
+      onchange: (e) => { const v = Math.min(max, Math.max(min, Number(e.target.value))); if (Number.isFinite(v)) { item[key] = v; renderMain(); } } }));
+}
+function selectField(cap, item, key, options) {
+  return h('div', { class: 'dose-field' },
+    h('span', { class: 'cap' }, cap),
+    h('select', { value: item[key], onchange: (e) => { item[key] = e.target.value; renderMain(); } },
+      ...options.map((o) => h('option', { value: o.id, selected: (item[key] || 'per_side') === o.id ? '' : null }, getLang() === 'th' ? o.labelTh : o.label))));
+}
+function dosageCard() {
+  const refs = getAllReferences(S.patientId);
+  const th = getLang() === 'th';
+  const body = S.plan.items.length === 0
+    ? h('div', { class: 'muted', style: { padding: '8px 0', fontSize: '13px' } }, t('noExercises'))
+    : h('div', {}, ...S.plan.items.map((item) => {
+        const ex = item.exercise || getExercise(item.exerciseId);
+        const hasLibraryRef = ex.source === 'custom' && !!(ex.jointMotion || ex.targetJointAngles || ex.jointAngles);
+        const hasRef = !!refs[item.exerciseId] || hasLibraryRef;
+        return h('div', { class: 'dose-row' },
+          h('div', { class: 'col gap6' },
+            h('b', {}, exLabel(ex, t)),
+            h('span', { style: { fontSize: '11.5px', fontWeight: '600', color: hasRef ? 'var(--good)' : 'var(--warn)' } },
+              hasRef ? (hasLibraryRef && !refs[item.exerciseId]
+                ? (th ? '✓ มี reference ในคลัง' : '✓ library reference')
+                : (th ? '✓ มี reference' : '✓ has reference'))
+                     : (th ? '⚠ ยังไม่ได้จับท่า · ใช้ค่า default' : '⚠ no reference · using defaults'))),
+          ex.type === 'hold'
+            ? doseField(t('holdSec'), item, 'holdSec', 1, 120)
+            : doseField(t('repsTarget'), item, 'reps', 1, 50),
+          doseField(t('setsTarget'), item, 'sets', 1, 10),
+          ex.movementPattern === 'alternating'
+            ? selectField(th ? 'การนับ' : 'Count', item, 'countMode', COUNT_MODES)
+            : null,
+          h('button', { class: 'x-btn', title: t('removeFromPlan'), onclick: () => toggleExercise(item.exerciseId),
+            html: icon('trash', { size: 16 }) }),
+        );
+      }));
+  return h('div', { class: 'card' },
+    h('div', { class: 'eyebrow', style: { marginBottom: '6px' } }, t('planExercises') + (S.plan.items.length ? ` · ${S.plan.items.length}` : '')),
+    body);
+}
+
+// ── Schedule + timeframe ────────────────────────────────────
+function fmtDate(s) {
+  const d = new Date((s || todayStr()) + 'T00:00:00');
+  return d.toLocaleDateString(getLang() === 'th' ? 'th-TH' : 'en-US', { day: 'numeric', month: 'short' });
+}
+function stepper(key, min, max) {
+  const set = (v) => { const n = Math.min(max, Math.max(min, Math.round(v))); if (Number.isFinite(n)) { S.plan[key] = n; renderMain(); } };
+  return h('div', { class: 'stepper' },
+    h('button', { type: 'button', onclick: () => set((Number(S.plan[key]) || min) - 1) }, '−'),
+    h('input', { type: 'number', value: String(S.plan[key]), min: String(min), max: String(max),
+      onchange: (e) => set(Number(e.target.value)) }),
+    h('button', { type: 'button', onclick: () => set((Number(S.plan[key]) || min) + 1) }, '+'));
+}
+function stepBlock(label, key, min, max) {
+  return h('div', {}, h('span', { class: 'f-cap' }, label), stepper(key, min, max));
+}
+function daysWord(n) { return getLang() === 'th' ? 'วัน' : (n === 1 ? 'day' : 'days'); }
+function scheduleCard() {
+  const th = getLang() === 'th';
+  const days = S.plan.durationDays;
+  const ticks = [];
+  for (let i = 7; i < days; i += 7) ticks.push(h('span', { class: 'tl-tick', style: { left: (i / days * 100) + '%' } })); // weekly markers
+  return h('div', { class: 'card' },
+    h('div', { class: 'eyebrow' }, t('schedule')),
+    h('div', { class: 'sub-label' }, th ? 'ความถี่' : 'Cadence'),
+    h('label', { class: 'tf-row' },
+      h('span', { class: 'f-cap', style: { margin: '0' } }, th ? 'ครั้ง / วัน' : 'Times / day'),
+      h('span', { class: 'len' }, stepper('freqPerDay', 1, 6))),
+    h('div', { class: 'sub-label' }, th ? 'ช่วงเวลา' : 'Timeframe'),
+    h('label', { class: 'tf-row' },
+      h('span', { class: 'f-cap', style: { margin: '0' } }, t('startDate')),
+      h('input', { type: 'date', value: S.plan.startDate,
+        onchange: (e) => { S.plan.startDate = e.target.value || todayStr(); renderMain(); } })),
+    h('label', { class: 'tf-row' },
+      h('span', { class: 'f-cap', style: { margin: '0' } }, th ? 'ระยะเวลา' : 'Length'),
+      h('span', { class: 'len' }, stepper('durationDays', 1, 365), h('span', { class: 'unit' }, daysWord(days)))),
+    h('div', { class: 'tl' },
+      h('div', { class: 'tl-head' },
+        h('span', { class: 'eyebrow' }, th ? 'ช่วงโปรแกรม' : 'Program span'),
+        h('span', { class: 'tl-weeks' }, `${days} ${daysWord(days)}`)),
+      h('div', { class: 'tl-bar' }, h('div', { class: 'tl-fill' }), ...ticks,
+        h('span', { class: 'tl-cap start' }), h('span', { class: 'tl-cap end' })),
+      h('div', { class: 'tl-dates' },
+        h('span', {}, h('small', {}, th ? 'เริ่ม' : 'Start'), fmtDate(S.plan.startDate)),
+        h('span', { class: 'end' }, h('small', {}, th ? 'สิ้นสุด' : 'Ends'), fmtDate(addDays(S.plan.startDate, days))))),
+  );
+}
+
+// ── Notes ───────────────────────────────────────────────────
+function notesCard() {
+  const th = getLang() === 'th';
+  return h('div', { class: 'card col gap6' },
+    h('div', { class: 'eyebrow' }, t('notesForPatient')),
+    h('textarea', {
+      rows: '3',
+      placeholder: th ? 'เช่น หยุดถ้าเจ็บแปลบ · พัก 30 วินาทีระหว่างเซ็ต' : 'e.g. Stop if you feel sharp pain. Rest 30s between sets.',
+      style: { width: '100%', resize: 'vertical', padding: '10px', border: '1px solid var(--line)', borderRadius: '10px', background: 'var(--surface)', font: 'inherit', color: 'inherit' },
+      oninput: (e) => { S.plan.notes = e.target.value; },
+    }, S.plan.notes || ''),
+  );
+}
+
+// ── Program (prescription receipt) ──────────────────────────
+function chip(num, label) {
+  return h('span', { class: 'chip' }, h('span', { class: 'd' }, String(num)), label);
+}
+function summaryCard() {
+  const th = getLang() === 'th';
+  const n = S.plan.items.length;
+  const total = n * S.plan.freqPerDay * S.plan.durationDays;
+  const empty = n === 0;
+  return h('div', { class: 'card prog' + (empty ? ' empty' : '') },
+    h('div', { class: 'eyebrow' }, th ? 'โปรแกรม' : 'Program'),
+    h('div', { class: 'hero' + (empty ? ' empty' : '') },
+      h('span', { class: 'num' }, empty ? '—' : String(total)),
+      h('span', { class: 'u' },
+        h('b', {}, th ? 'เซสชัน' : 'sessions'),
+        h('span', {}, empty ? (th ? 'ยังไม่มีโปรแกรม' : 'nothing scheduled yet')
+                            : `${th ? 'ภายใน' : 'over'} ${S.plan.durationDays} ${daysWord(S.plan.durationDays)}`))),
+    empty
+      ? h('div', { class: 'hint' }, th ? 'เพิ่มท่าทางด้านซ้ายเพื่อสร้างโปรแกรม จำนวนรวมจะอัปเดตให้เอง'
+                                       : 'Add exercises on the left to build the program. The total dose updates as you go.')
+      : h('div', { class: 'breakdown' },
+          chip(n, th ? 'ท่า' : 'exercises'),
+          chip(S.plan.freqPerDay, th ? 'ครั้ง/วัน' : '× / day')),
+    h('button', { class: 'btn primary block', disabled: empty ? '' : null, onclick: save,
+      html: icon('check', { size: 16, color: '#FBFAF5' }) + ' ' + t('savePlan') }),
+  );
+}
+
+// ── Render ──────────────────────────────────────────────────
+function renderMain() {
+  const root = document.getElementById('root'); clear(root);
+  root.append(h('div', { class: 'plan-main' },
+    h('div', { class: 'col gap16' }, pickerCard(), dosageCard()),
+    h('div', { class: 'col gap16' }, scheduleCard(), notesCard(), summaryCard()),
+  ));
+}
+function render() { if (!authed) return; topbar(); renderMain(); mountNav('therapist/plan'); }
+
+// ── Actions ─────────────────────────────────────────────────
+function toggleExercise(id) {
+  S.plan.items = inPlan(id)
+    ? S.plan.items.filter((i) => i.exerciseId !== id)
+    : [...S.plan.items, planItemDefault(id)];
+  renderMain();
+}
+function planItemDefault(id) {
+  const ex = getExercise(id);
+  const item = { exerciseId: id, reps: ex.reps, sets: ex.sets, holdSec: ex.holdSec, tol: ex.tol };
+  if (ex.movementPattern === 'alternating') item.countMode = ex.countMode || 'per_side';
+  const snap = exerciseSnapshot(ex);
+  if (snap) item.exercise = snap;
+  return item;
+}
+async function save() {
+  if (!S.patientId) { toast(getLang() === 'th' ? 'เลือกผู้ป่วยก่อน' : 'Select a patient first'); return; }
+  if (S.plan.items.length === 0) { toast(t('planEmpty')); return; }
+  try {
+    await savePlanFull(S.patientId, S.plan);
+    const name = S.patients.find((p) => p.id === S.patientId)?.name || '';
+    toast(t('planSaved', { name }));
+  } catch (e) {
+    toast(getLang() === 'th' ? 'บันทึกขึ้นคลาวด์ไม่สำเร็จ' : 'Cloud save failed');
+  }
+}
+
+onLangChange(render);
+loadPlan(); // ensure S.plan is set before any re-render
+(async () => {
+  await ensureTherapist();              // gate: therapist login overlay if not signed in
+  authed = true;
+  try {
+    await refreshPatients();              // real linked patients; demo only when explicitly enabled/local
+  } catch (e) {
+    toast(getLang() === 'th' ? 'โหลดรายชื่อผู้ป่วยไม่สำเร็จ' : 'Could not load patients');
+    S.patients = [];
+    S.patientId = null;
+    loadPlan();
+  }
+  render();
+})();
+</script>
+</body>
+</html>

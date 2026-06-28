@@ -1,0 +1,427 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>PhysioAI · Dashboard</title>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<link rel="icon" href="../shared/assets/favicon.svg" type="image/svg+xml"/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="../shared/assets/theme.css"/>
+<style>
+  .dash { display: grid; grid-template-columns: 320px 1fr; gap: 20px; padding: 20px 24px; max-width: 1320px; margin: 0 auto; align-items: start; }
+  .plist { display: flex; flex-direction: column; gap: 10px; }
+  .pcard { text-align: left; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 13px 14px; cursor: pointer; display: flex; gap: 12px; align-items: center; transition: all .15s; }
+  .pcard:hover { box-shadow: var(--shadow-sm); }
+  .pcard.active { box-shadow: inset 0 0 0 1.5px var(--brand); }
+  .pavatar { width: 40px; height: 40px; border-radius: 12px; background: var(--brand-soft); color: var(--brand-deep); display: flex; align-items: center; justify-content: center; font-weight: 700; flex-shrink: 0; }
+  .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  .kpi { position: relative; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 15px 16px; box-shadow: var(--shadow-sm); transition: transform .15s, box-shadow .15s; }
+  .kpi:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
+  .kpi .eyebrow { padding-right: 38px; }
+  .kpi .v { font-size: 24px; font-weight: 700; font-family: var(--mono); margin-top: 4px; color: var(--ink); }
+  .kpi .kpi-ico { position: absolute; top: 13px; right: 13px; width: 30px; height: 30px; border-radius: 9px; background: var(--brand-soft); color: var(--brand-deep); display: flex; align-items: center; justify-content: center; }
+  .chart { display: flex; align-items: flex-end; gap: 10px; height: 150px; padding-top: 10px; }
+  .chart .bar { flex: 1; background: linear-gradient(180deg, var(--brand), var(--brand-deep)); border-radius: 8px 8px 0 0; position: relative; min-height: 6px; transition: height .4s, opacity .2s, filter .15s; }
+  .chart .bar:hover { filter: brightness(1.06); }
+  /* Staggered entrance, echoing the landing reveal */
+  .dash .kpi, .dash > div > .card { animation: px-fade-in .4s cubic-bezier(.2,.7,.3,1) both; }
+  .kpis .kpi:nth-child(2) { animation-delay: .04s; }
+  .kpis .kpi:nth-child(3) { animation-delay: .08s; }
+  .kpis .kpi:nth-child(4) { animation-delay: .12s; }
+  .chart .bar b { position: absolute; top: -18px; left: 0; right: 0; text-align: center; font-size: 11px; font-family: var(--mono); color: var(--ink2); }
+  .chart .bar span { position: absolute; bottom: -20px; left: 0; right: 0; text-align: center; font-size: 11px; color: var(--ink3); }
+  .filter-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 8px 0 12px; }
+  .score-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .score-card { border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: var(--surface); min-height: 76px; }
+  .score-card .value { font-family: var(--mono); font-size: 22px; font-weight: 700; margin-top: 6px; }
+  .metric-row { margin-top: 10px; }
+  .metric-row .meta { display: flex; justify-content: space-between; font-size: 12px; font-weight: 600; color: var(--ink2); margin-bottom: 5px; }
+  .metric-track { height: 8px; border-radius: 4px; overflow: hidden; background: var(--surface3); }
+  .metric-fill { height: 100%; border-radius: 4px; background: var(--brand); }
+  .issue-list { display: grid; gap: 7px; margin-top: 10px; }
+  .issue-item { display: flex; gap: 8px; align-items: flex-start; font-size: 13.5px; color: var(--ink); }
+  .issue-num { width: 21px; height: 21px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: var(--brand-soft); color: var(--brand-deep); font-size: 11px; font-weight: 700; flex-shrink: 0; }
+  .data tr.active td { background: var(--brand-soft); }
+  .data tbody tr { cursor: pointer; }
+  @media (max-width: 980px) { .dash { grid-template-columns: 1fr; } .plist { flex-direction: row; overflow-x: auto; } .pcard { min-width: 220px; } .kpis { grid-template-columns: 1fr 1fr; } }
+  @media (max-width: 680px) { .score-cards { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body class="web-shell">
+<div id="top"></div>
+<div id="root"></div>
+<script type="module">
+import { h, clear, mountNav, onLangChange, getLang, t, icon, ringSVG, sparkSVG } from '../shared/core/ui.js';
+import { fetchPatients, fetchSessions, fetchPlan } from '../shared/core/patients.js';
+import { getExercise, exLabel } from '../shared/core/exercises.js';
+import { generateSummary } from '../shared/ai/summary.js';
+import { aggregate, sessionTrend, sessionScore } from '../shared/ai/SessionAnalytics.js';
+import { clinicalAlerts } from '../shared/ai/ClinicalRuleEngine.js';
+import { buildSummaryPrompt, summarize, isConfigured } from '../shared/ai/LlmSummary.js';
+import { ensureTherapist, getTherapist, logout, isGuest } from '../shared/core/auth-ui.js';
+
+let selected = null;
+let selectedExercise = 'all';
+let selectedSessionKey = null;
+let authed = false; // gate: render() is a no-op until ensureTherapist() resolves (blocks cross-tab pre-auth paint of patient data)
+let patientsModel = []; // [{ id,name,email,condition,condTh,sessions,avgScore,adherence,trend,status,lastSeenMin }]
+let loading = true;
+let loadError = null;
+
+// Build a dashboard patient model from a cloud patient {id,name,email} + their real
+// sessions (+ plan for adherence). Falls back to any demo fields when there are no logs.
+function buildModel(p, sessions, plan) {
+  const list = (sessions || []).slice().sort((a, b) => b.endedAt - a.endedAt);
+  const scores = list.map(sessionScore).filter((n) => Number.isFinite(n));
+  const avgScore = scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : (p.avgScore ?? 0);
+  const lastMs = list.length ? list[0].endedAt : null;
+  const lastSeenMin = lastMs != null ? Math.max(0, Math.round((Date.now() - lastMs) / 60000)) : (p.lastSeenMin ?? null);
+  const status = lastSeenMin != null ? (lastSeenMin < 5 ? 'live' : 'offline') : (p.status || 'offline');
+  const trend = list.length ? list.slice(0, 7).reverse().map((s) => sessionScore(s) ?? 0) : (p.trend || []);
+  let adherence = p.adherence ?? 0;
+  if (plan && Array.isArray(plan.items) && plan.items.length) {
+    const prescribed = (plan.freqPerDay || 1) * (plan.daysPerWeek || 7) * plan.items.length;
+    const done = list.filter((s) => (s.kind || 'plan') !== 'extra' && Date.now() - s.endedAt < 7 * 86400000).length;
+    adherence = prescribed ? Math.min(100, Math.round((done / prescribed) * 100)) : 0;
+  }
+  const condition = p.condition || p.email || '';
+  return { id: p.id, name: p.name, email: p.email, condition, condTh: p.condTh || condition,
+           sessions: list, avgScore, adherence, trend, status, lastSeenMin };
+}
+
+// Pull the roster + each patient's sessions/plan from the cloud (parallel) → build models.
+async function loadData() {
+  try {
+    const roster = await fetchPatients();
+    patientsModel = await Promise.all(roster.map(async (p) => {
+      const [sessions, plan] = await Promise.all([fetchSessions(p.id), fetchPlan(p.id)]);
+      return buildModel(p, sessions, plan);
+    }));
+    loadError = null;
+    if (!selected || !patientsModel.find((m) => m.id === selected)) selected = patientsModel[0]?.id || null;
+  } catch (e) {
+    loadError = e;
+    patientsModel = [];
+    selected = null;
+  } finally {
+    loading = false;
+  }
+}
+
+function topbar() {
+  const lang = getLang();
+  const top = document.getElementById('top'); clear(top);
+  const me = getTherapist();
+  const whoName = me?.name || (isGuest() ? 'Guest' : (lang === 'th' ? 'นักกายภาพ' : 'Therapist'));
+  const whoBtn = h('button', { class: 'btn ghost', title: isGuest() ? (lang === 'th' ? 'ออกจากเดโม' : 'Exit demo') : (lang === 'th' ? 'ออกจากระบบ' : 'Log out'),
+    onclick: () => { logout(); location.reload(); } }, whoName);
+  top.append(h('div', { class: 'topbar' },
+    h('div', { class: 'brand-row' },
+      h('div', { class: 'logo-mark', html: '<img src="../shared/assets/logo-reversed.svg" width="20" height="20" alt="PhysioAI"/>' }),
+      h('div', {}, h('div', { class: 'wordmark', html: 'Physio<b>AI</b>' }), h('div', { style: { fontSize: '15px', fontWeight: '600' } }, t('dashTitle'))),
+    ),
+    h('div', { class: 'row gap10' },
+      h('a', { class: 'btn ghost', href: 'capture.html', html: icon('cam', { size: 16 }) + ' ' + t('captureTitle') }),
+      whoBtn,
+      h('div', { class: 'pill good', html: '<span class="dot" style="background:var(--good)"></span>' + t('onDeviceActive') }),
+    ),
+  ));
+}
+
+function lastSeenText(min, lang) {
+  if (min === 0) return t('live');
+  if (min < 60) return `${min}m`;
+  if (min < 1440) return `${Math.round(min / 60)}h`;
+  return `${Math.round(min / 1440)}d`;
+}
+
+function patientList() {
+  const lang = getLang();
+  const patients = patientsModel;
+  return h('div', { class: 'plist' },
+    h('div', { class: 'eyebrow', style: { padding: '2px' } }, `${t('patients')} · ${patients.length}`),
+    ...patients.map((p) => h('button', { class: 'pcard' + (p.id === selected ? ' active' : ''), onclick: () => { selected = p.id; selectedExercise = 'all'; selectedSessionKey = null; render(); } },
+      h('div', { class: 'pavatar' }, (p.name || '?').split(' ').map((w) => w[0]).join('').slice(0, 2)),
+      h('div', { class: 'grow' },
+        h('div', { class: 'row between' }, h('b', { style: { fontSize: '14.5px' } }, p.name),
+          p.status === 'live' ? h('span', { class: 'pill good sm', html: '<span class="live-dot" style="--bad:var(--good)"></span>' + t('live') }) : h('span', { class: 'muted', style: { fontSize: '11px' } }, t('lastSeen') + ' ' + (p.lastSeenMin == null ? '—' : lastSeenText(p.lastSeenMin, lang)))),
+        h('div', { class: 'muted', style: { fontSize: '12px', marginTop: '2px' } }, lang === 'th' ? p.condTh : p.condition),
+      ),
+    )),
+  );
+}
+
+function kpi(label, value, sub, ico) {
+  return h('div', { class: 'kpi' },
+    ico ? h('div', { class: 'kpi-ico', html: icon(ico, { size: 16 }) }) : null,
+    h('div', { class: 'eyebrow' }, label),
+    h('div', { class: 'v' }, value),
+    sub ? h('div', { class: 'muted', style: { fontSize: '12px', marginTop: '2px' } }, sub) : null);
+}
+
+function sessionKey(s) {
+  return s?.id || `${s?.endedAt || 0}:${s?.exerciseId || ''}:${s?.source || ''}`;
+}
+
+function toneFor(score) {
+  const n = Number(score);
+  if (!Number.isFinite(n)) return 'glass';
+  return n >= 75 ? 'good' : n >= 50 ? 'warn' : 'bad';
+}
+
+function scoreText(score) {
+  return Number.isFinite(Number(score)) ? `${Math.round(Number(score))}%` : '—';
+}
+
+function exerciseName(ex) {
+  return exLabel(ex, t);
+}
+
+function issueLabels(lang) {
+  return {
+    tempo: lang === 'th' ? 'ทำช้าลงและคุมจังหวะให้สม่ำเสมอ' : 'Slow down and keep tempo steady',
+    smoothness: lang === 'th' ? 'ลดการกระตุกระหว่างเคลื่อนไหว' : 'Reduce jerky movement during transitions',
+    path: lang === 'th' ? 'รักษาแนวการเคลื่อนไหว' : 'Keep the movement on path',
+    sync: lang === 'th' ? 'ขยับสองข้างให้พร้อมกัน' : 'Move both sides evenly',
+    sequence: lang === 'th' ? 'ทำตามลำดับซ้าย/ขวาที่กำหนด' : 'Follow the required left/right sequence',
+    inactiveSide: lang === 'th' ? 'คุมอีกข้างให้อยู่ใกล้ท่าพัก' : 'Keep the inactive side near rest',
+    tracking: lang === 'th' ? 'ให้เห็นข้อต่อสำคัญชัดขึ้น' : 'Keep the key joints clearly visible',
+    boundary: lang === 'th' ? 'อยู่ในกรอบตลอดทั้งครั้ง' : 'Stay inside the boundary for the whole rep',
+    pose: lang === 'th' ? 'จัดท่าให้ใกล้ reference มากขึ้น' : 'Match the reference pose more closely',
+    motion: lang === 'th' ? 'ควบคุม motion ให้ต่อเนื่องขึ้น' : 'Control the motion more smoothly',
+  };
+}
+
+function topIssuesForSession(s, lang) {
+  const labels = issueLabels(lang);
+  const sorted = Object.entries(s?.motionIssueCounts || {})
+    .filter(([, n]) => n > 0)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3);
+  if (!sorted.length) return [lang === 'th' ? 'ไม่มีปัญหาหลักในเซสชันนี้' : 'No major issues detected in this session'];
+  return sorted.map(([k]) => labels[k] || k);
+}
+
+function scoreCard(label, score) {
+  const tone = toneFor(score);
+  return h('div', { class: 'score-card' },
+    h('div', { class: 'eyebrow' }, label),
+    h('div', { class: 'value', style: { color: tone === 'good' ? 'var(--good)' : tone === 'warn' ? 'var(--warn)' : tone === 'bad' ? 'var(--bad)' : 'var(--ink3)' } }, scoreText(score)));
+}
+
+function metricRow(label, score) {
+  const n = Number.isFinite(Number(score)) ? Math.round(Number(score)) : null;
+  const tone = toneFor(n);
+  const color = tone === 'good' ? 'var(--good)' : tone === 'warn' ? 'var(--warn)' : tone === 'bad' ? 'var(--bad)' : 'var(--ink3)';
+  return h('div', { class: 'metric-row' },
+    h('div', { class: 'meta' }, h('span', {}, label), h('span', {}, scoreText(n))),
+    h('div', { class: 'metric-track' }, h('div', { class: 'metric-fill', style: { width: `${Math.max(0, Math.min(100, n || 0))}%`, background: color } })));
+}
+
+function exerciseFilter(sessions, lang) {
+  const ids = [...new Set((sessions || []).map((s) => s.exerciseId).filter(Boolean))];
+  if (selectedExercise !== 'all' && !ids.includes(selectedExercise)) selectedExercise = 'all';
+  return h('div', { class: 'filter-row' },
+    h('span', { class: 'eyebrow' }, lang === 'th' ? 'กรองตามท่า' : 'Exercise filter'),
+    h('button', { class: 'pill sm' + (selectedExercise === 'all' ? ' brand' : ''), onclick: () => { selectedExercise = 'all'; selectedSessionKey = null; render(); } }, lang === 'th' ? 'ทุกท่า' : 'All'),
+    ...ids.map((id) => {
+      const ex = getExercise(id);
+      return h('button', { class: 'pill sm' + (selectedExercise === id ? ' brand' : ''), onclick: () => { selectedExercise = id; selectedSessionKey = null; render(); } }, exerciseName(ex));
+    }),
+  );
+}
+
+function sessionDetailCard(s, lang) {
+  if (!s) {
+    return h('div', { class: 'card' },
+      h('div', { class: 'eyebrow', style: { marginBottom: '8px' } }, lang === 'th' ? 'รายละเอียดเซสชัน' : 'Session detail'),
+      h('div', { class: 'muted' }, t('noSessions')));
+  }
+  const ex = getExercise(s.exerciseId);
+  const overall = s.overallScore ?? s.avgScore;
+  const pose = s.avgPoseScore ?? s.avgScore;
+  const motion = s.avgMotionScore;
+  const d = new Date(s.endedAt);
+  const issues = topIssuesForSession(s, lang);
+  return h('div', { class: 'card' },
+    h('div', { class: 'row between wrap gap8', style: { marginBottom: '10px' } },
+      h('div', {},
+        h('div', { class: 'eyebrow' }, lang === 'th' ? 'รายละเอียดเซสชัน' : 'Session detail'),
+        h('div', { class: 'h2', style: { marginTop: '2px' } }, exerciseName(ex))),
+      h('span', { class: 'pill sm glass' }, d.toLocaleDateString(lang === 'th' ? 'th-TH' : 'en-US', { month: 'short', day: 'numeric' }))),
+    h('div', { class: 'score-cards' },
+      scoreCard(lang === 'th' ? 'รวม' : 'Overall', overall),
+      scoreCard(lang === 'th' ? 'ท่าทาง' : 'Pose', pose),
+      scoreCard('Motion', motion)),
+    h('div', { style: { marginTop: '12px' } },
+      metricRow(lang === 'th' ? 'จังหวะ' : 'Tempo', s.avgTempoScore),
+      metricRow(lang === 'th' ? 'ความลื่นไหล' : 'Smoothness', s.avgSmoothnessScore),
+      metricRow(lang === 'th' ? 'แนวการเคลื่อนไหว' : 'Path', s.avgPathScore),
+      metricRow(lang === 'th' ? 'ความพร้อมกัน' : 'Sync', s.avgSyncScore)),
+    h('div', { class: 'row gap8 wrap', style: { marginTop: '12px' } },
+      h('span', { class: 'pill sm good' }, `${s.validReps ?? s.reps ?? 0} ${t('reps')}`),
+      h('span', { class: 'pill sm ' + ((s.invalidRepCount || 0) ? 'bad' : 'glass') }, `${s.invalidRepCount || 0} ${lang === 'th' ? 'ไม่ผ่าน' : 'invalid'}`),
+      h('span', { class: 'pill sm glass' }, `${s.durationSec || 0}s`)),
+    h('div', { class: 'issue-list' }, ...issues.map((txt, i) => h('div', { class: 'issue-item' },
+      h('span', { class: 'issue-num' }, String(i + 1)),
+      h('span', {}, txt)))),
+  );
+}
+
+function main() {
+  const lang = getLang();
+  const patients = patientsModel;
+  const p = patients.find((x) => x.id === selected) || patients[0];
+  const sessions = p.sessions;
+  const sessionExerciseIds = new Set(sessions.map((s) => s.exerciseId).filter(Boolean));
+  if (selectedExercise !== 'all' && !sessionExerciseIds.has(selectedExercise)) {
+    selectedExercise = 'all';
+    selectedSessionKey = null;
+  }
+  const viewSessions = selectedExercise === 'all'
+    ? sessions
+    : sessions.filter((s) => s.exerciseId === selectedExercise);
+  const selectedSession = viewSessions.find((s) => sessionKey(s) === selectedSessionKey) || viewSessions[0] || null;
+  if (selectedSession && sessionKey(selectedSession) !== selectedSessionKey) selectedSessionKey = sessionKey(selectedSession);
+  const allSessions = patients.flatMap((x) => x.sessions);
+
+  // ── KPIs (derived from real cloud sessions) ────────────────
+  const agg = aggregate(viewSessions);          // P3.2a: real aggregation for the selected exercise view
+  const trend = sessionTrend(viewSessions, 7);  // P3.2a: real trend + moving average
+  const activeLive = patients.filter((x) => x.status === 'live').length;
+  const weekCount = allSessions.filter((s) => Date.now() - s.endedAt < 7 * 86400000).length;
+  const avgAdh = patients.length ? Math.round(patients.reduce((a, x) => a + (x.adherence || 0), 0) / patients.length) : 0;
+  const avgScore = agg.sessionCount ? agg.avgScore : p.avgScore;
+
+  // ── Form-score trend — derived from real session logs (not seed) ──
+  const useReal = trend.scores.length > 0;
+  const series = useReal ? trend.scores : p.trend;
+  const movav = useReal ? trend.movavg : p.trend;
+  const trendMax = Math.max(...series, 100);
+  const weekdays = ['weekday_mon', 'weekday_tue', 'weekday_wed', 'weekday_thu', 'weekday_fri', 'weekday_sat', 'weekday_sun'];
+  const recentAsc = viewSessions.slice(0, 7).reverse();   // oldest→newest, aligns with series
+  const barLabel = (i) => {
+    if (useReal && recentAsc[i]) { const d = new Date(recentAsc[i].endedAt); return d.toLocaleDateString(lang === 'th' ? 'th-TH' : 'en-US', { month: 'numeric', day: 'numeric' }); }
+    return t(weekdays[i] || 'today');
+  };
+  const chart = h('div', { class: 'chart' }, ...series.map((v, i) => h('div', { class: 'bar', style: { height: `${(v / trendMax) * 100}%`, opacity: i === series.length - 1 ? '1' : '0.4' } },
+    h('b', {}, String(Math.round(v))), h('span', {}, barLabel(i)))));
+  const trendCard = h('div', { class: 'card' },
+    h('div', { class: 'row between', style: { marginBottom: '6px' } },
+      h('div', { class: 'eyebrow' }, t('formTrend') + (selectedExercise === 'all' ? '' : ' · ' + exerciseName(getExercise(selectedExercise))) + (useReal ? '' : ' · seed')),
+      h('div', { class: 'row gap8', style: { alignItems: 'center' } }, h('span', { class: 'muted', style: { fontSize: '11px' } }, t('movingAvg')), h('div', { html: sparkSVG(movav, { width: 80, height: 22 }) }))),
+    chart,
+    h('div', { style: { height: '14px' } }),
+  );
+
+  // ── Clinical Alerts Panel (P3.3b) — fed by the rule engine (P3.2b) ──
+  const alerts = clinicalAlerts(p, sessions, lang);
+  const alertTone = (sev) => (sev === 'high' ? 'bad' : sev === 'med' ? 'warn' : 'good');
+  const alertsCard = h('div', { class: 'card' },
+    h('div', { class: 'eyebrow', style: { marginBottom: '8px' } }, t('alerts')),
+    alerts.length
+      ? h('div', { class: 'col gap8' }, ...alerts.map((a) => h('div', { class: 'row gap8', style: { alignItems: 'center' } },
+          h('span', { class: 'pill sm ' + alertTone(a.severity) }, a.severity.toUpperCase()),
+          h('div', { style: { fontSize: '13.5px' } }, a.text))))
+      : h('div', { class: 'muted', style: { padding: '4px 0' } }, t('noAlerts')),
+  );
+
+  // ── AI session summary — on-device template now; cloud LLM when configured (P3.2c/3.3c) ──
+  const summaryEl = h('div', { style: { fontSize: '14.5px', lineHeight: '1.55' } }, generateSummary(p, sessions, lang));
+  const srcBadge = h('span', { class: 'pill sm glass' }, t('summarySrc') + ': ' + t(isConfigured() ? 'srcCloud' : 'srcOnDevice'));
+  const summaryBox = h('div', { class: 'card', style: { background: 'linear-gradient(180deg, var(--surface), var(--surface2))' } },
+    h('div', { class: 'row between', style: { marginBottom: '10px' } },
+      h('div', { class: 'row gap8' }, h('span', { class: 'logo-mark', style: { width: '28px', height: '28px' }, html: icon('spark', { size: 15, color: '#F5F1EA' }) }), h('b', {}, t('aiSummary'))),
+      h('div', { class: 'row gap8', style: { alignItems: 'center' } }, srcBadge,
+        h('button', { class: 'btn ghost', style: { height: '34px' }, html: icon('refresh', { size: 14 }) + ' ' + t('regenerate'), onclick: () => render() }))),
+    summaryEl,
+    h('div', { class: 'muted', style: { fontSize: '11px', marginTop: '10px', fontStyle: 'italic' } }, t('summaryNote')),
+  );
+  // Async upgrade — inert while LLM_CONFIG is blank (summarize() returns null → template stays).
+  if (isConfigured()) {
+    summarize(buildSummaryPrompt(p, sessions, lang)).then((txt) => {
+      if (txt) { summaryEl.textContent = txt; srcBadge.textContent = t('summarySrc') + ': ' + t('srcCloud'); }
+    });
+  }
+
+  // Recent sessions table
+  const rows = viewSessions.slice(0, 8).map((s) => {
+    const ex = getExercise(s.exerciseId);
+    const score = s.overallScore ?? s.avgScore;
+    const tone = toneFor(score);
+    const motion = s.avgMotionScore;
+    const d = new Date(s.endedAt);
+    return h('tr', { class: sessionKey(s) === selectedSessionKey ? 'active' : '', onclick: () => { selectedSessionKey = sessionKey(s); render(); } },
+      h('td', {}, exerciseName(ex)),
+      h('td', {}, `${s.reps} ${t('reps')} · ${s.sets} ${t('sets')}`),
+      h('td', {}, `${s.durationSec}s`),
+      h('td', {}, h('span', { class: 'pill ' + tone + ' sm' }, scoreText(score))),
+      h('td', {}, h('span', { class: 'pill ' + toneFor(motion) + ' sm' }, scoreText(motion))),
+      h('td', {}, h('span', { class: 'pill ' + ((s.invalidRepCount || 0) ? 'bad' : 'glass') + ' sm' }, String(s.invalidRepCount || 0))),
+      h('td', { class: 'muted' },
+        h('span', {}, d.toLocaleDateString(lang === 'th' ? 'th-TH' : 'en-US', { month: 'short', day: 'numeric' })),
+        s.source !== 'seed' ? h('span', { class: 'dot', style: { background: 'var(--brand)', marginLeft: '7px' }, title: 'new' }) : null),
+    );
+  });
+  const sessionsCard = h('div', { class: 'card' },
+    h('div', { class: 'eyebrow', style: { marginBottom: '8px' } }, t('recentSessions')),
+    exerciseFilter(sessions, lang),
+    viewSessions.length ? h('table', { class: 'data' },
+      h('thead', {}, h('tr', {}, h('th', {}, t('exercise')), h('th', {}, t('reps')), h('th', {}, t('hold')), h('th', {}, t('score')), h('th', {}, 'Motion'), h('th', {}, lang === 'th' ? 'ไม่ผ่าน' : 'Invalid'), h('th', {}, t('today')))),
+      h('tbody', {}, ...rows),
+    ) : h('div', { class: 'muted', style: { padding: '12px 0' } }, t('noSessions')),
+  );
+
+  return h('div', { class: 'col gap16' },
+    h('div', { class: 'row between wrap gap10' },
+      h('div', {}, h('div', { class: 'h2' }, p.name), h('div', { class: 'muted' }, lang === 'th' ? p.condTh : p.condition)),
+      h('div', { class: 'row gap8' },
+        h('button', { class: 'btn ghost', html: icon('message', { size: 16 }) + ' ' + t('message') }),
+        h('a', { class: 'btn primary', href: 'capture.html', html: icon('cam', { size: 16, color: '#FBFAF5' }) + ' ' + t('review') })),
+    ),
+    h('div', { class: 'kpis' },
+      kpi(t('activePatients'), `${patients.length}`, `${activeLive} ${t('live')}`, 'users'),
+      kpi(t('avgScore'), `${avgScore}`, t('adherence') + ' ' + p.adherence + '%', 'spark'),
+      kpi(t('sessionsWeek'), `${weekCount}`, selectedExercise === 'all' ? '' : exerciseName(getExercise(selectedExercise)), 'cal'),
+      kpi(t('adherence'), `${avgAdh}%`, lang === 'th' ? 'เฉลี่ยทุกคน' : 'all patients', 'flame'),
+    ),
+    trendCard,
+    sessionDetailCard(selectedSession, lang),
+    alertsCard,
+    summaryBox,
+    sessionsCard,
+  );
+}
+
+function render() {
+  if (!authed) return;
+  topbar();
+  const root = document.getElementById('root'); clear(root);
+  if (!patientsModel.length) {
+    const lang = getLang();
+    root.append(h('div', { class: 'dash' }, h('div', {}),
+      h('div', { class: 'card', style: { padding: '28px', textAlign: 'center' } },
+        h('div', { class: 'muted' }, loading
+          ? (lang === 'th' ? 'กำลังโหลดข้อมูลผู้ป่วย…' : 'Loading patients…')
+          : loadError
+            ? (lang === 'th' ? 'โหลดข้อมูลผู้ป่วยไม่สำเร็จ' : 'Could not load patient data')
+          : (lang === 'th' ? 'ยังไม่มีผู้ป่วยลงทะเบียน' : 'No patients registered yet')))));
+    mountNav('therapist/dashboard');
+    return;
+  }
+  root.append(h('div', { class: 'dash' }, patientList(), main()));
+  mountNav('therapist/dashboard');
+}
+onLangChange(render);
+(async () => {
+  await ensureTherapist();   // gate: therapist login overlay (or guest) before showing the dashboard
+  authed = true;
+  render();                  // loading state
+  await loadData();          // pull roster + sessions + plans from the cloud (parallel)
+  render();                  // real data
+})();
+</script>
+</body>
+</html>

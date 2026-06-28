@@ -1,0 +1,33 @@
+{
+  "expo": {
+    "name": "PhysioAI",
+    "slug": "physioai-patient",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "scheme": "physioai",
+    "icon": "./assets/icon.png",
+    "newArchEnabled": false,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.physioai.patient",
+      "infoPlist": {
+        "NSCameraUsageDescription": "PhysioAI uses the camera on-device to analyze your exercise form. No video ever leaves your device."
+      }
+    },
+    "android": {
+      "package": "com.physioai.patient",
+      "permissions": ["android.permission.CAMERA"]
+    },
+    "plugins": [
+      [
+        "react-native-vision-camera",
+        {
+          "cameraPermissionText": "PhysioAI uses the camera on-device to analyze your exercise form. No video ever leaves your device.",
+          "enableFrameProcessors": true
+        }
+      ],
+      "./plugins/withPoseModels"
+    ]
+  }
+}

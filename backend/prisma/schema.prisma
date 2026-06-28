@@ -1,0 +1,67 @@
+// PhysioAI backend — Prisma schema (PostgreSQL on Railway).
+// V3 app on V2's backend stack. Plan/Reference/Session keep a JSON `data` blob
+// so the API responses match the app contract 1:1 (the row-mappers read row.data).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  role         String   @default("patient") // "patient" | "therapist"
+  createdAt    DateTime @default(now())
+
+  plan        Plan?
+  references  Reference[]
+  sessions    Session[]
+  asTherapist TherapistPatient[] @relation("therapist")
+  asPatient   TherapistPatient[] @relation("patient")
+}
+
+model Plan {
+  patientId String   @id // one plan per patient
+  data      Json
+  updatedAt DateTime @updatedAt
+  patient   User     @relation(fields: [patientId], references: [id], onDelete: Cascade)
+}
+
+model Reference {
+  patientId  String
+  exerciseId String
+  data       Json
+  updatedAt  DateTime @updatedAt
+  patient    User     @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@id([patientId, exerciseId])
+}
+
+model Session {
+  id         String   @id
+  patientId  String
+  exerciseId String?
+  endedAt    BigInt // epoch ms (used for ordering; response uses data.endedAt)
+  data       Json
+  createdAt  DateTime @default(now())
+  patient    User     @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@index([patientId])
+}
+
+model TherapistPatient {
+  therapistId String
+  patientId   String
+  linkedAt    DateTime @default(now())
+  therapist   User     @relation("therapist", fields: [therapistId], references: [id], onDelete: Cascade)
+  patient     User     @relation("patient", fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@id([therapistId, patientId])
+  @@index([therapistId])
+}

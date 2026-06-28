@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>PhysioAI · Home</title>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<meta name="description" content="On-device AI physiotherapy for disabled persons in Thailand."/>
+<link rel="icon" href="shared/assets/favicon.svg" type="image/svg+xml"/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Gabarito:wght@700&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="shared/assets/theme.css"/>
+<style>
+  /* Landing tool launcher — a balanced Setup → Plan → Dashboard workflow row. */
+  .tool-grid {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;
+    width: 100%; max-width: 760px; margin-top: 2px;
+  }
+  .tool-card {
+    position: relative; display: flex; flex-direction: column; align-items: flex-start;
+    gap: 12px; text-align: left; text-decoration: none; overflow: hidden;
+    background: var(--surface); color: var(--ink);
+    border: 1px solid var(--line); border-radius: var(--r-lg);
+    padding: 22px 20px 18px;
+    animation: px-fade-in .5s cubic-bezier(.2,.7,.3,1) both;
+    transition: transform .18s cubic-bezier(.2,.7,.3,1), box-shadow .18s, border-color .18s;
+  }
+  .tool-card::before {
+    content: ""; position: absolute; inset: 0 0 auto 0; height: 3px;
+    background: linear-gradient(90deg, var(--brand), var(--brand-deep));
+    transform: scaleX(0); transform-origin: left; transition: transform .3s ease;
+  }
+  .tool-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); border-color: var(--line-strong); }
+  .tool-card:hover::before { transform: scaleX(1); }
+  .tool-icon {
+    width: 52px; height: 52px; border-radius: 15px; flex-shrink: 0;
+    background: var(--brand-soft); color: var(--brand-deep);
+    display: flex; align-items: center; justify-content: center;
+    transition: background .18s, color .18s, transform .18s;
+  }
+  .tool-card:hover .tool-icon { background: var(--brand-deep); color: #F5F1EA; transform: scale(1.04); }
+  .tool-step {
+    position: absolute; top: 16px; right: 18px;
+    font-family: var(--mono); font-size: 12px; font-weight: 600; letter-spacing: .5px; color: var(--ink3);
+  }
+  .tool-title { font-size: 16px; font-weight: 600; letter-spacing: -.2px; color: var(--ink); }
+  .tool-sub { font-size: 13px; line-height: 1.5; color: var(--ink3); }
+  .tool-go {
+    margin-top: 2px; display: inline-flex; align-items: center; gap: 6px;
+    font-size: 12.5px; font-weight: 600; color: var(--brand-deep);
+    opacity: 0; transform: translateX(-4px); transition: opacity .2s, transform .2s;
+  }
+  .tool-card:hover .tool-go { opacity: 1; transform: none; }
+  @media (max-width: 720px) {
+    .tool-grid { grid-template-columns: 1fr; max-width: 380px; }
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="module">
+import { h, clear, mountNav, onLangChange, getLang, t, icon } from './shared/core/ui.js';
+import { ensureTherapist, getTherapist, logout, isGuest } from './shared/core/auth-ui.js';
+
+let authed = false; // gate: render() is a no-op until ensureTherapist() resolves
+
+function logo() {
+  return h('div', { html:
+    '<svg width="180" height="132" viewBox="0 0 340 250" role="img" aria-label="PhysioAI">' +
+    '<g transform="translate(106 0) scale(2)">' +
+    '<path d="M 19 46 L 47 40 L 37 14" stroke="#2F5D50" stroke-width="11" stroke-linecap="round" stroke-linejoin="round" fill="none"></path>' +
+    '<circle cx="19" cy="46" r="8" fill="#7BA88F"></circle></g>' +
+    '<text x="170" y="228" text-anchor="middle" font-family="Gabarito, sans-serif" font-weight="700" font-size="54" letter-spacing="-0.5" fill="#25342E">Physio<tspan fill="#2F5D50">AI</tspan></text>' +
+    '</svg>' });
+}
+
+function view() {
+  const lang = getLang();
+  const tools = [
+    { href: 'therapist/capture.html',   icon: 'cam',   step: '01', title: t('modeCapture'),
+      sub: lang === 'th' ? 'บันทึกท่าอ้างอิงสำหรับการให้คะแนน' : 'Capture a reference pose for scoring' },
+    { href: 'therapist/plan.html',      icon: 'cal',   step: '02', title: t('modePlan'),
+      sub: lang === 'th' ? 'สั่งโปรแกรมออกกำลังที่บ้าน — ครั้ง · เซ็ต · ตารางเวลา' : 'Prescribe a home program — reps, sets, schedule' },
+    { href: 'therapist/dashboard.html', icon: 'chart', step: '03', title: t('modeDash'),
+      sub: lang === 'th' ? 'ติดตามความสม่ำเสมอและแนวโน้มฟอร์มของผู้ป่วย' : 'Track patient adherence & form trends' },
+  ];
+  return h('div', { class: 'landing' },
+    logo(),
+    h('div', {},
+      h('h1', {}, t('landingTitle')),
+      h('p', {}, t('landingSub')),
+    ),
+    h('div', { class: 'tool-grid' }, ...tools.map((tl, i) => h('a', {
+        class: 'tool-card', href: tl.href, style: { animationDelay: (0.05 + i * 0.08) + 's' },
+      },
+      h('span', { class: 'tool-step' }, tl.step),
+      h('div', { class: 'tool-icon', html: icon(tl.icon, { size: 24 }) }),
+      h('div', { class: 'tool-title' }, tl.title),
+      h('div', { class: 'tool-sub' }, tl.sub),
+      h('span', { class: 'tool-go', html: (lang === 'th' ? 'เปิด' : 'Open') + ' ' + icon('arrow_r', { size: 14 }) }),
+    ))),
+    h('div', { class: 'hint' }, t('navHint')),
+    h('div', { class: 'hint', style: { marginTop: '6px' } },
+      (isGuest() ? 'Guest' : (getTherapist()?.name || (lang === 'th' ? 'นักกายภาพ' : 'Therapist'))) + ' · ',
+      h('a', { href: '#', style: { color: 'var(--brand-deep)', fontWeight: '600', textDecoration: 'none' },
+        onclick: (e) => { e.preventDefault(); logout(); location.reload(); } },
+        isGuest() ? (lang === 'th' ? 'ออกจากเดโม' : 'Exit demo') : (lang === 'th' ? 'ออกจากระบบ' : 'Sign out'))),
+  );
+}
+
+function render() {
+  if (!authed) return;
+  const root = document.getElementById('root');
+  clear(root); root.append(view());
+  mountNav('');
+}
+onLangChange(render);
+(async () => { await ensureTherapist(); authed = true; render(); })();
+</script>
+</body>
+</html>
