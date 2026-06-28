@@ -326,3 +326,4 @@ if (require.main === module) start();
 module.exports = app;
 module.exports.app = app;
 module.exports.start = start;
+module.exports.prisma = prisma; // exposed for test teardown (afterAll cleanup / $disconnect)

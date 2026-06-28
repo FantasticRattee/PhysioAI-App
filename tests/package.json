@@ -1,0 +1,22 @@
+{
+  "name": "physioai-tests",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Isolated test harness for PhysioAI — backend API (supertest + Railway DB), Patient AI pipeline (node), Therapist shared modules (jsdom). Self-contained: NOT part of any app build or the Railway deploy.",
+  "scripts": {
+    "test": "npm run test:unit && npm run test:backend",
+    "test:backend": "jest --selectProjects backend --runInBand",
+    "test:patient": "jest --selectProjects patient",
+    "test:therapist": "jest --selectProjects therapist",
+    "test:unit": "jest --selectProjects patient therapist",
+    "coverage": "jest --selectProjects patient therapist --coverage"
+  },
+  "devDependencies": {
+    "@babel/preset-env": "^7.24.7",
+    "babel-jest": "^29.7.0",
+    "jest": "^29.7.0",
+    "jest-environment-jsdom": "^29.7.0",
+    "jsonwebtoken": "^9.0.3",
+    "supertest": "^6.3.4"
+  }
+}
