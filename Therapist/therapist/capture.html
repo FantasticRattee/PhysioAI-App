@@ -33,6 +33,34 @@
   .mode-toggle button.active { background: var(--surface); color: var(--ink); box-shadow: var(--shadow-sm); }
   .panel { display: flex; flex-direction: column; gap: 14px; }
   .refprev { width: 100%; aspect-ratio: 16/10; border-radius: 12px; background: var(--surface2); display: none; }
+  /* ROM joint picker — clickable anatomical figure (pairs with the chips) */
+  .rom-figure { display: flex; gap: 14px; align-items: center; margin-top: 4px; padding: 12px; border: 1px solid var(--line); border-radius: 14px; background: linear-gradient(180deg, var(--surface), var(--surface2)); }
+  .rom-skel { width: 116px; flex: none; align-self: stretch; display: flex; align-items: center; }
+  .rom-skel-svg { display: block; width: 100%; height: auto; overflow: visible; }
+  .rom-skel-svg .bone { fill: none; stroke: var(--line-strong); stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+  .rom-skel-svg .node { cursor: pointer; }
+  .rom-skel-svg .node .hit { fill: transparent; }
+  .rom-skel-svg .node .halo { fill: var(--brand-soft); opacity: 0; transition: opacity .12s ease; }
+  .rom-skel-svg .node .dot { fill: var(--surface); stroke: var(--brand); stroke-width: 2; transition: transform .12s ease, fill .12s ease, stroke .12s ease; transform-box: fill-box; transform-origin: center; }
+  .rom-skel-svg .node:hover .dot { stroke: var(--brand-deep); transform: scale(1.28); }
+  .rom-skel-svg .node.on .dot { fill: var(--brand); stroke: var(--brand-deep); }
+  .rom-skel-svg .node.on .halo { opacity: 1; }
+  .rom-skel-svg .node:focus { outline: none; }
+  .rom-skel-svg .node:focus-visible .dot { stroke: var(--brand-deep); transform: scale(1.28); }
+  .rom-skel-svg .node:focus-visible .halo { opacity: 1; }
+  .rom-chips { display: flex; flex-wrap: wrap; gap: 6px; align-content: flex-start; }
+  /* Reference target card */
+  .ref-hero { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 12px; background: var(--brand-soft); }
+  .ref-bignum { font-size: 30px; font-weight: 600; line-height: 1; letter-spacing: -0.5px; color: var(--brand-deep); }
+  .ref-motion { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 10px; font-size: 11.5px; color: var(--ink3); }
+  .ref-motion b { color: var(--ink); font-size: 12.5px; }
+  .ref-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .ref-jlist { display: flex; flex-direction: column; }
+  .ref-jrow { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 7px 0; border-top: 1px solid var(--line); }
+  .ref-jrow:first-child { border-top: 0; }
+  .ref-jname { font-size: 12.5px; color: var(--ink2); }
+  .ref-jval { font-size: 11px; color: var(--ink); text-align: right; }
+  @media (prefers-reduced-motion: reduce) { .rom-skel-svg .dot, .rom-skel-svg .halo { transition: none; } }
   @media (max-width: 900px) { .cap-main { grid-template-columns: 1fr; padding: 16px; } }
 </style>
 </head>
@@ -603,7 +631,10 @@ function renderClipPreview() {
   const seq = activePendingSequence();
   if (!seq?.frames?.length) {
     updateClipPreviewControls();
-    if (!S.cameraOn && R.canvas) R.canvas.getContext('2d').clearRect(0, 0, R.canvas.width, R.canvas.height);
+    // Keep a loaded still image (+ its skeleton) on the canvas. Without the
+    // !S.imageMode guard, the renderPanel() that fromImage() runs right after
+    // drawing would immediately wipe the photo and skeleton.
+    if (!S.cameraOn && !S.imageMode && R.canvas) R.canvas.getContext('2d').clearRect(0, 0, R.canvas.width, R.canvas.height);
     return;
   }
   const idx = clipPreviewIndex(seq);
@@ -722,6 +753,42 @@ function resetRomMeasurement() {
   renderPanel();
 }
 
+// Clickable anatomical figure for the ROM picker. Front view (patient facing
+// the camera → patient's right is on the viewer's left). Each node is a joint;
+// tapping it toggles the same S.angleOverlayJoints used by the text chips.
+function romSkeletonSVG(lang, selected) {
+  const P = {
+    neck: [60, 42], right_shoulder: [38, 50], left_shoulder: [82, 50], back: [60, 82],
+    right_elbow: [28, 84], left_elbow: [92, 84], right_hip: [46, 110], left_hip: [74, 110],
+    right_knee: [44, 150], left_knee: [76, 150],
+  };
+  const labelOf = (j) => { const s = JOINT_SPECS.find((x) => x.joint === j); return s ? (lang === 'th' ? s.labelTh : s.label) : j; };
+  const bones = '<circle class="bone" cx="60" cy="18" r="11"/>'
+    + '<path class="bone" d="M60 29 L60 110 M38 50 L82 50 M46 110 L74 110 M82 50 L92 84 L98 114 M38 50 L28 84 L22 114 M74 110 L76 150 L78 188 M46 110 L44 150 L42 188"/>';
+  const nodes = ANGLE_PICKER_JOINTS.filter((j) => P[j]).map((j) => {
+    const [x, y] = P[j]; const on = selected.has(j);
+    return `<g class="node${on ? ' on' : ''}" data-joint="${j}" role="button" tabindex="0" aria-pressed="${on}" aria-label="${labelOf(j)}">`
+      + `<circle class="halo" cx="${x}" cy="${y}" r="9"/>`
+      + `<circle class="dot" cx="${x}" cy="${y}" r="5"/>`
+      + `<circle class="hit" cx="${x}" cy="${y}" r="12"/></g>`;
+  }).join('');
+  const aria = lang === 'th' ? 'เลือกข้อต่อที่จะวัดจากภาพร่างกาย' : 'Select joints to measure on the body';
+  return `<svg viewBox="0 0 120 200" class="rom-skel-svg" role="group" aria-label="${aria}">${bones}${nodes}</svg>`;
+}
+
+function romFigure(lang, selected) {
+  const pick = (target) => {
+    const g = target && target.closest && target.closest('[data-joint]');
+    if (g) toggleOverlayJoint(g.getAttribute('data-joint'));
+  };
+  return h('div', {
+    class: 'rom-skel',
+    html: romSkeletonSVG(lang, selected),
+    onclick: (e) => pick(e.target),
+    onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(e.target); } },
+  });
+}
+
 // ── Top bar ─────────────────────────────────────────────────
 function topbar() {
   const lang = getLang();
@@ -730,6 +797,7 @@ function topbar() {
   const libraryLabel = lang === 'th' ? 'คลังท่าของฉัน' : 'My exercise library';
   const patientSel = h('select', { onchange: async (e) => {
         S.patientId = e.target.value || null;
+        S.imageMode = false; // drop any still-image preview when switching patient
         try { await loadPatientData(S.patientId); }
         catch { toast(getLang() === 'th' ? 'โหลดข้อมูลผู้ป่วยจากคลาวด์ไม่สำเร็จ' : 'Could not load patient cloud data'); loadRef(); }
         renderPanel();
@@ -984,7 +1052,7 @@ function renderPanel() {
   }
   const exerciseChoices = getExercises();
   const exercisePill = (e) => {
-    const pill = h('button', { class: 'pill' + (e.id === S.exId ? ' brand' : ''), onclick: () => { S.exId = e.id; S.newEx = false; S.captureDraft = null; renderPanel(); } }, exLabel(e, t));
+    const pill = h('button', { class: 'pill' + (e.id === S.exId ? ' brand' : ''), onclick: () => { S.exId = e.id; S.newEx = false; S.captureDraft = null; S.imageMode = false; renderPanel(); } }, exLabel(e, t));
     if (e.source !== 'custom') return pill;
     const del = h('button', { class: 'pill', title: lang === 'th' ? 'ลบท่านี้' : 'Delete', style: { padding: '6px 8px' }, onclick: () => { deleteCustomExercise(e.id); S.captureDraft = null; if (S.exId === e.id) S.exId = EXERCISES[0].id; renderPanel(); } }, '×');
     return h('span', { class: 'row', style: { alignItems: 'center' } }, pill, del);
@@ -1013,6 +1081,10 @@ function renderPanel() {
     class: 'pill' + (!selectedOverlay.size ? ' brand' : ''),
     onclick: resetRomMeasurement,
   }, lang === 'th' ? 'อัตโนมัติตามท่า' : 'Auto');
+  const jointChips = ANGLE_PICKER_JOINTS
+    .map((joint) => JOINT_SPECS.find((s) => s.joint === joint))
+    .filter(Boolean)
+    .map(angleChip);
   const angleCard = h('div', { class: 'card' },
     h('div', { class: 'eyebrow', style: { marginBottom: '8px' } }, lang === 'th' ? 'วัด ROM บนวิดีโอ' : 'ROM measurement'),
     h('div', { class: 'muted', style: { fontSize: '12.5px', marginBottom: '8px' } }, lang === 'th' ? 'เลือกส่วนร่างกาย' : 'Body region'),
@@ -1021,13 +1093,11 @@ function renderPanel() {
         .map((id) => BODY_REGIONS.find((region) => region.id === id))
         .filter(Boolean)
         .map(regionChip)),
-    h('div', { class: 'muted', style: { fontSize: '12.5px', marginTop: '12px', marginBottom: '8px' } }, lang === 'th' ? 'ปรับรายข้อต่อ' : 'Fine-tune joints'),
-    h('div', { class: 'row gap6 wrap' },
-      autoChip,
-      ...ANGLE_PICKER_JOINTS
-        .map((joint) => JOINT_SPECS.find((s) => s.joint === joint))
-        .filter(Boolean)
-        .map(angleChip)),
+    h('div', { class: 'muted', style: { fontSize: '12.5px', marginTop: '14px', marginBottom: '2px' } }, lang === 'th' ? 'ข้อต่อที่จะวัด' : 'Joints to measure'),
+    h('div', { class: 'muted', style: { fontSize: '11.5px', marginBottom: '8px' } }, lang === 'th' ? 'แตะข้อต่อบนภาพ หรือเลือกจากชิปก็ได้' : 'Tap a joint on the figure — or use the chips'),
+    h('div', { class: 'rom-figure' },
+      romFigure(lang, selectedOverlay),
+      h('div', { class: 'rom-chips' }, autoChip, ...jointChips)),
     h('div', { class: 'muted', style: { marginTop: '10px', fontSize: '12.5px' } },
       lang === 'th'
         ? (S.romBodyRegion
@@ -1141,7 +1211,7 @@ function renderPanel() {
     return lang === 'th' ? 'ติดตาม' : 'tracked';
   };
   const jointCycleRows = S.reference && tracked.length
-    ? h('div', { class: 'col gap6', style: { padding: '8px 0', borderTop: '1px solid var(--line)', borderBottom: '1px solid var(--line)' } },
+    ? h('div', { class: 'ref-jlist' },
       ...tracked.map((joint) => {
         const c = cycleAnglesFor(joint);
         const role = S.reference?.jointMotion?.[joint]?.role || S.reference?.jointRoles?.[joint]?.role;
@@ -1149,27 +1219,36 @@ function renderPanel() {
         const suffix = Number.isFinite(c.range)
           ? ` · ${roleText(role)} ${Math.round(c.range)}°${c.trajectoryRange ? ' path' : ''}`
           : '';
-        return h('div', { class: 'row between', style: { alignItems: 'baseline', gap: '12px' } },
-          h('span', { class: 'muted', style: { fontSize: '12.5px' } }, jointName(joint)),
-          h('b', { class: 'mono', style: { fontSize: '11px', textAlign: 'right' } }, values + suffix));
+        return h('div', { class: 'ref-jrow' },
+          h('span', { class: 'ref-jname' }, jointName(joint)),
+          h('span', { class: 'mono ref-jval' }, values + suffix));
       }))
     : null;
-  const presCard = h('div', { class: 'card col gap10' },
-    h('div', { class: 'eyebrow' }, lang === 'th' ? 'ค่าอ้างอิง (สำหรับให้คะแนน)' : 'Reference target (for scoring)'),
-    h('div', { class: 'muted', style: { fontSize: '12.5px' } }, refMeta),
-    h('div', { class: 'row between' },
-      h('span', { class: 'muted' }, t('targetAngle')), h('b', { class: 'mono' }, targetShownText)),
-    h('div', { class: 'row between' },
-      h('span', { class: 'muted' }, lang === 'th' ? 'Rest → Target → Rest' : 'Rest → Target → Rest'),
-      h('b', { class: 'mono', style: { fontSize: '12px', textAlign: 'right' } }, primaryCycleText)),
-    h('div', { class: 'row between' },
-      h('span', { class: 'muted' }, lang === 'th' ? 'ROM / Timing' : 'ROM / Timing'),
-      h('b', { class: 'mono', style: { fontSize: '12px', textAlign: 'right' } },
-        `${Number.isFinite(primaryCycle.range) ? Math.round(primaryCycle.range) + '°' : '—'}${timingText ? ' · ' + timingText : ''}`)),
-    h('div', { class: 'row between' },
-      h('span', { class: 'muted' }, lang === 'th' ? 'Pattern' : 'Pattern'), h('b', { class: 'mono', style: { fontSize: '11px', textAlign: 'right' } }, S.reference?.movementPattern || ex.movementPattern || 'unilateral')),
-    h('div', { class: 'row between' },
-      h('span', { class: 'muted' }, lang === 'th' ? 'ข้อต่อที่ติดตาม' : 'Tracked joints'), h('b', { class: 'mono', style: { fontSize: '11px', textAlign: 'right' } }, trackedLabel)),
+  const romRangeText = `${Number.isFinite(primaryCycle.range) ? Math.round(primaryCycle.range) + '°' : '—'}${timingText ? ' · ' + timingText : ''}`;
+  const patternText = S.reference?.movementPattern || ex.movementPattern || 'unilateral';
+  const trackedChips = tracked.length
+    ? h('div', { class: 'ref-chips' },
+      ...tracked.map((joint) => h('span', { class: 'pill sm' }, jointName(joint))),
+      ...(skippedRequested.length
+        ? [h('span', { class: 'pill sm warn' }, (lang === 'th' ? 'ไม่มีข้อมูล ' : 'unavailable ') + skippedRequested.map(jointName).join(', '))]
+        : []))
+    : h('span', { class: 'muted', style: { fontSize: '12px' } }, lang === 'th' ? 'ระบบจะเลือกจาก motion ตอนบันทึก' : 'detected from motion during capture');
+  const presCard = h('div', { class: 'card col gap12' },
+    h('div', {},
+      h('div', { class: 'eyebrow' }, lang === 'th' ? 'ค่าอ้างอิง (สำหรับให้คะแนน)' : 'Reference target (for scoring)'),
+      h('div', { class: 'muted', style: { fontSize: '12px', marginTop: '3px' } }, refMeta)),
+    h('div', { class: 'ref-hero' },
+      h('div', { class: 'ref-bignum mono' }, targetShownText),
+      h('div', { class: 'col', style: { gap: '2px' } },
+        h('div', { class: 'eyebrow' }, t('targetAngle')),
+        h('div', { class: 'muted', style: { fontSize: '12px' } }, 'ROM ' + romRangeText)),
+      h('span', { class: 'pill sm', style: { marginLeft: 'auto' } }, patternText)),
+    h('div', { class: 'ref-motion' },
+      h('span', {}, lang === 'th' ? 'พัก → เป้าหมาย → พัก' : 'Rest → Target → Rest'),
+      h('b', { class: 'mono' }, primaryCycleText)),
+    h('div', { class: 'col gap6' },
+      h('div', { class: 'eyebrow' }, lang === 'th' ? 'ข้อต่อที่ติดตาม' : 'Tracked joints'),
+      trackedChips),
     jointCycleRows,
     numField(lang === 'th' ? 'ค่าเผื่อ (±°)' : 'Tolerance (±°)', 'tol', 1, 45),
     h('button', { class: 'btn block', onclick: savePlanSettings,
